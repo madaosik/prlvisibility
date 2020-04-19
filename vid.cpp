@@ -24,7 +24,9 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &numprocs);       // ulozime si celkovy pocet rozbehnutych procesu
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);           // id procesu
 
-    vector<vector<int>> heights_per_proc = get_heights_per_proc(argv, numprocs);
+    int total_in;
+    vector<vector<int>> heights_per_proc = get_heights_per_proc(argv, numprocs, &total_in);
+
     int base = heights_per_proc[0][0];
 
     if (myid == 0) {
@@ -38,7 +40,7 @@ int main(int argc, char *argv[])
     vector<double> angles(my_heights_cnt);
     
     if (myid == 0) {
-        angles[0] = 0;
+        angles[0] = -2;
         for (int i = 1; i < my_heights_cnt; i++) 
         {
          angles[i] = compute_vert_angle(mynums[i], base, i);
@@ -59,16 +61,167 @@ int main(int argc, char *argv[])
         debug_print_double_vector(angles);
     }
     */
+    double max_angle = find_max_in_array(angles, my_heights_cnt);
+    //cout << "jsem procesor " << double(myid) << " a moje MAX je " << max << endl;
+
+
+    // UPSWEEP faze
+    int rounds= log2(numprocs);
+    vector<double> values(rounds);
+    int count = 0;
+    int from, to, step, shift;
+    double right;
+    for (int round = 1; round <= rounds; round++)
+    {
+        values[round - 1] = max_angle;
+        count++;
+        step = pow(2, round);
+        shift = pow(2, round - 1);
+        if (myid % step == 0) {
+            from = myid + shift;
+            MPI_Recv(&right, 1, MPI_DOUBLE, from, TAG, MPI_COMM_WORLD, &stat);
+            //cout << "jsem procesor " << myid << " a prijal jsem od " << from << " hodnotu " << max_angle << endl;
+            max_angle = max(max_angle, right);
+            //cout << max_angle << endl;
+        } else {
+            to = myid - shift;
+            //cout << "jsem procesor " << myid << " a posilam procesoru " << to << " hodnotu " << max_angle << endl;
+            MPI_Send(&max_angle, 1, MPI_DOUBLE, to, TAG, MPI_COMM_WORLD);
+            break;
+        }
+    }/*
+    if (myid==3){
+        cout << "Contents of 'values' vector of processor " << myid << ":" << endl;
+        debug_print_double_vector(values);
+    }
+    */
+    // DOWNSWEEP faze
+    double left;
+    double new_value;
+    int temp;
+
+    max_angle = -2; // neutralni prvek
+    
+    for (int round = rounds; round > 0; round--)
+    {
+        shift = pow(2, round -1);
+        step = pow(2, round);
+        if (myid % step == 0) {
+            to = myid + shift;
+            if (myid == 0) {
+                temp = 0;
+            }
+            else {
+                temp = 1; 
+            }
+            left = values[--count - temp];
+            new_value = max(left, max_angle);
+            MPI_Send(&new_value, 1, MPI_DOUBLE, to, TAG, MPI_COMM_WORLD);
+        }
+        else if (round <= count) {
+            from = myid - shift;
+            MPI_Recv(&max_angle, 1, MPI_DOUBLE, from, TAG, MPI_COMM_WORLD, &stat);
+        }
+    }
+    //cout << "jsem procesor " << double(myid) << " a moje MAX je " << max_angle << endl;
+    //int iter = get_ht_id(myid, heights_per_proc);
+    //if (myid == 0)
+    //    iter--;
+
+    int visibility[my_heights_cnt];
+    double new_max = max_angle;
+    for (int i = 0; i < my_heights_cnt; i++)
+    {   
+        //if (myid == 3)
+        //    cout << "Processor " << myid << ",angle: " << angles[i] << " max angle: " << max_angle << endl;
+        if (angles[i] > new_max) {
+            new_max = angles[i];
+            visibility[i] = true;
+        }
+        else {
+            visibility[i] = false;
+        }
+    }
+
+    // Finalni distribuce viditelnosti
+    vector<int> result(total_in);
+    int buf[BUFSIZE], sender_ht_cnt;
+    for(int i = 1; i < numprocs; i++)
+    {
+        if (myid == i)
+            //cout << i << endl << endl;
+            MPI_Send(&visibility, my_heights_cnt, MPI_INT, 0, TAG, MPI_COMM_WORLD);
+        if (myid == 0) {
+            sender_ht_cnt = heights_per_proc[i].size();
+            MPI_Recv(&buf, sender_ht_cnt, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat);
+            
+            int offset = get_ht_id(i, heights_per_proc);
+            //cout << offset << endl;
+            for (int j = 0; j < sender_ht_cnt; j++) {
+                result[j+offset] = buf[j];
+            }
+        }
+    }
+
+    if (myid == 0) {
+        for (int i = 0; i < my_heights_cnt; i++)
+            result[i] = visibility[i];
+        //debug_print_vector(result);
+        print_visibility(result);
+    }
+    // //FINALNI DISTRIBUCE VYSLEDKU K MASTEROVI-----------------------------------
+    // int* final= new int [numprocs];
+    // //final=(int*) malloc(numprocs*sizeof(int));
+    // for(int i=1; i<numprocs; i++){
+    //    if(myid == i) MPI_Send(&mynumber, 1, MPI_INT, 0, TAG,  MPI_COMM_WORLD);
+    //    if(myid == 0){
+    //        MPI_Recv(&neighnumber, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat); //jsem 0 a prijimam
+    //        final[i]=neighnumber;
+    //    }//if sem master
+    // }//for
+
+    // if(myid == 0){
+    //     //cout<<cycles<<endl;
+    //     final[0]= mynumber;
+    //     for(int i=0; i<numprocs; i++){
+    //         cout<<"proc: "<<i<<" num: "<<final[i]<<endl;
+    //     }//for
+    // }//if vypis
+    //cout<<"i am:"<<myid<<" my number is:"<<mynumber<<endl;
+    //VYSLEDKY------------------------------------------------------------------
 
 
 
+
+    //if(myid==2)
+      //  print_visibility(visibility);
+
+    // } else {
+    //     int base_iter = get_ht_id(myid, heights_per_proc);
+    //     int ht_iter = base_iter;
+    //     for (int i = 0; ht_iter < (base_iter + my_heights_cnt); i++, ht_iter++)
+    //     {
+    //      angles[i] = compute_vert_angle(mynums[i], base, ht_iter);
+    //     }
 
     //cout << numprocs << endl << endl;
     //double start, end;
     //MPI_Barrier(MPI_COMM_WORLD);
     //start = MPI_Wtime();
-    MPI_Finalize(); 
+    MPI_Finalize();
     return 0;
+}
+
+double find_max_in_array(vector<double> angles, int size)
+{
+    double max = angles[0];
+    if (size == 1) return max;
+    for (int i = 1; i < size; i++) {
+        if (angles[i] > max) {
+            max = angles[i];
+        }
+    }
+    return max;
 }
 
 int get_ht_id(int my_id, vector<vector<int>> heights_per_proc)
@@ -87,7 +240,7 @@ double compute_vert_angle(int target, int base, int index)
     return atan((target - base)/index);
 }
 
-vector<vector<int>> get_heights_per_proc(char **argv, int proc_cnt)
+vector<vector<int>> get_heights_per_proc(char **argv, int proc_cnt, int* total_in)
 {
     vector<vector<int>> heights_proc(proc_cnt);
     vector<int> heights = process_heights(argv,1);
@@ -115,6 +268,7 @@ vector<vector<int>> get_heights_per_proc(char **argv, int proc_cnt)
         temp_heights.clear();
         pushed_cnt += iter_cnt;
     }
+    *total_in = pushed_cnt;
     return heights_proc;
 }
 
@@ -144,10 +298,12 @@ int get_proc_cnt(char **argv)
     vector<int> heights = process_heights(argv,2);
     int inp_cnt = heights.size();
     int proc_cnt = 1;
-
     int i = 1;
     while (log2(proc_cnt) < (inp_cnt / proc_cnt))
     {   
+        if (log2(pow(2,i)) >= (inp_cnt / log2(pow(2,i))))
+            break;
+
         proc_cnt = pow(2, i);
         if (proc_cnt == MAX_PROC)
             break;
@@ -182,7 +338,7 @@ void debug_print_double_vector(vector<double> vect)
 {
     for (std::size_t i = 0; i < vect.size(); i++)
         cout << vect[i] << std::endl;
-    //cout << endl; 
+    cout << endl; 
 }
 
 void debug_print_2D_vector(vector<vector<int>> vect)
@@ -198,6 +354,20 @@ void debug_print_2D_vector(vector<vector<int>> vect)
             cout << vect[i][j] << ' ';
         }
         cout << endl;
+    }
+    cout << endl;
+}
+
+void print_visibility(vector<int> vis)
+{
+    cout << "_";
+    for (int i=1; i < vis.size(); i++) {
+        if (vis[i] == 1) {
+            cout << ",v";
+        }
+        else if (vis[i] == 0) {
+            cout << ",u";
+        }
     }
     cout << endl;
 }
