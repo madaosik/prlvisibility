@@ -1,3 +1,8 @@
+/*
+* Viditelnost - PRL projekt 3
+* Author:      Adam Lanicek
+*/
+
 #include <mpi.h>
 #include <math.h>
 #include <iostream>

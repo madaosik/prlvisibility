@@ -20,10 +20,12 @@ int main(int argc, char *argv[])
     }
 
     /* Inicializace MPI */
-    MPI_Init(&argc,&argv);      // inicializace MPI 
-    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);       // ulozime si celkovy pocet rozbehnutych procesu
-    MPI_Comm_rank(MPI_COMM_WORLD, &myid);           // id procesu
+    MPI_Init(&argc,&argv);   
+    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);       
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);           
 
+    //double start = MPI_Wtime();
+    
     int total_in;
     vector<vector<int>> heights_per_proc = get_heights_per_proc(argv, numprocs, &total_in);
 
@@ -35,7 +37,7 @@ int main(int argc, char *argv[])
     }
 
     int my_heights_cnt = heights_per_proc[myid].size();
-    MPI_Recv(mynums, my_heights_cnt, MPI_INT, 0, TAG, MPI_COMM_WORLD, &stat); //buffer,velikost,typ,rank odesilatele,tag, skupina, stat
+    MPI_Recv(mynums, my_heights_cnt, MPI_INT, 0, TAG, MPI_COMM_WORLD, &stat); 
 
     vector<double> angles(my_heights_cnt);
     
@@ -53,17 +55,7 @@ int main(int argc, char *argv[])
          angles[i] = compute_vert_angle(mynums[i], base, ht_iter);
         }
     }
-    /*
-    if (myid == 0) {
-        debug_print_double_vector(angles);
-    }
-    if (myid == 3) {
-        debug_print_double_vector(angles);
-    }
-    */
     double max_angle = find_max_in_array(angles, my_heights_cnt);
-    //cout << "jsem procesor " << double(myid) << " a moje MAX je " << max << endl;
-
 
     // UPSWEEP faze
     int rounds= log2(numprocs);
@@ -80,21 +72,15 @@ int main(int argc, char *argv[])
         if (myid % step == 0) {
             from = myid + shift;
             MPI_Recv(&right, 1, MPI_DOUBLE, from, TAG, MPI_COMM_WORLD, &stat);
-            //cout << "jsem procesor " << myid << " a prijal jsem od " << from << " hodnotu " << max_angle << endl;
             max_angle = max(max_angle, right);
             //cout << max_angle << endl;
         } else {
             to = myid - shift;
-            //cout << "jsem procesor " << myid << " a posilam procesoru " << to << " hodnotu " << max_angle << endl;
             MPI_Send(&max_angle, 1, MPI_DOUBLE, to, TAG, MPI_COMM_WORLD);
             break;
         }
-    }/*
-    if (myid==3){
-        cout << "Contents of 'values' vector of processor " << myid << ":" << endl;
-        debug_print_double_vector(values);
     }
-    */
+
     // DOWNSWEEP faze
     double left;
     double new_value;
@@ -123,17 +109,11 @@ int main(int argc, char *argv[])
             MPI_Recv(&max_angle, 1, MPI_DOUBLE, from, TAG, MPI_COMM_WORLD, &stat);
         }
     }
-    //cout << "jsem procesor " << double(myid) << " a moje MAX je " << max_angle << endl;
-    //int iter = get_ht_id(myid, heights_per_proc);
-    //if (myid == 0)
-    //    iter--;
 
     int visibility[my_heights_cnt];
     double new_max = max_angle;
     for (int i = 0; i < my_heights_cnt; i++)
     {   
-        //if (myid == 3)
-        //    cout << "Processor " << myid << ",angle: " << angles[i] << " max angle: " << max_angle << endl;
         if (angles[i] > new_max) {
             new_max = angles[i];
             visibility[i] = true;
@@ -149,14 +129,12 @@ int main(int argc, char *argv[])
     for(int i = 1; i < numprocs; i++)
     {
         if (myid == i)
-            //cout << i << endl << endl;
             MPI_Send(&visibility, my_heights_cnt, MPI_INT, 0, TAG, MPI_COMM_WORLD);
         if (myid == 0) {
             sender_ht_cnt = heights_per_proc[i].size();
             MPI_Recv(&buf, sender_ht_cnt, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat);
             
             int offset = get_ht_id(i, heights_per_proc);
-            //cout << offset << endl;
             for (int j = 0; j < sender_ht_cnt; j++) {
                 result[j+offset] = buf[j];
             }
@@ -169,45 +147,13 @@ int main(int argc, char *argv[])
         //debug_print_vector(result);
         print_visibility(result);
     }
-    // //FINALNI DISTRIBUCE VYSLEDKU K MASTEROVI-----------------------------------
-    // int* final= new int [numprocs];
-    // //final=(int*) malloc(numprocs*sizeof(int));
-    // for(int i=1; i<numprocs; i++){
-    //    if(myid == i) MPI_Send(&mynumber, 1, MPI_INT, 0, TAG,  MPI_COMM_WORLD);
-    //    if(myid == 0){
-    //        MPI_Recv(&neighnumber, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat); //jsem 0 a prijimam
-    //        final[i]=neighnumber;
-    //    }//if sem master
-    // }//for
-
-    // if(myid == 0){
-    //     //cout<<cycles<<endl;
-    //     final[0]= mynumber;
-    //     for(int i=0; i<numprocs; i++){
-    //         cout<<"proc: "<<i<<" num: "<<final[i]<<endl;
-    //     }//for
-    // }//if vypis
-    //cout<<"i am:"<<myid<<" my number is:"<<mynumber<<endl;
-    //VYSLEDKY------------------------------------------------------------------
-
-
-
-
-    //if(myid==2)
-      //  print_visibility(visibility);
-
-    // } else {
-    //     int base_iter = get_ht_id(myid, heights_per_proc);
-    //     int ht_iter = base_iter;
-    //     for (int i = 0; ht_iter < (base_iter + my_heights_cnt); i++, ht_iter++)
-    //     {
-    //      angles[i] = compute_vert_angle(mynums[i], base, ht_iter);
-    //     }
-
-    //cout << numprocs << endl << endl;
-    //double start, end;
-    //MPI_Barrier(MPI_COMM_WORLD);
-    //start = MPI_Wtime();
+    /*
+    MPI_Barrier(MPI_COMM_WORLD);
+    double end = MPI_Wtime();
+    if (myid == 0) {
+        cout << end-start << endl;
+    }
+    */
     MPI_Finalize();
     return 0;
 }
